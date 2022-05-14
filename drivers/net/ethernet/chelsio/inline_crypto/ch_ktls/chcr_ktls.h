@@ -26,6 +26,7 @@
 
 #define CHCR_KTLS_WR_SIZE	(CHCR_PLAIN_TX_DATA_LEN +\
 				 sizeof(struct cpl_tx_sec_pdu))
+#define FALLBACK		35
 
 enum ch_ktls_open_state {
 	CH_KTLS_OPEN_SUCCESS = 0,
@@ -74,6 +75,8 @@ struct chcr_ktls_ofld_ctx_tx {
 struct chcr_ktls_uld_ctx {
 	struct list_head entry;
 	struct cxgb4_lld_info lldi;
+	struct xarray tid_list;
+	bool detach;
 };
 
 static inline struct chcr_ktls_ofld_ctx_tx *

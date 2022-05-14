@@ -41,11 +41,11 @@ struct mlx5e_ipsec_tx {
 };
 
 /* IPsec RX flow steering */
-static enum mlx5e_traffic_types fs_esp2tt(enum accel_fs_esp_type i)
+static enum mlx5_traffic_types fs_esp2tt(enum accel_fs_esp_type i)
 {
 	if (i == ACCEL_FS_ESP4)
-		return MLX5E_TT_IPV4_IPSEC_ESP;
-	return MLX5E_TT_IPV6_IPSEC_ESP;
+		return MLX5_TT_IPV4_IPSEC_ESP;
+	return MLX5_TT_IPV6_IPSEC_ESP;
 }
 
 static int rx_err_add_rule(struct mlx5e_priv *priv,
@@ -60,17 +60,17 @@ static int rx_err_add_rule(struct mlx5e_priv *priv,
 	struct mlx5_flow_spec *spec;
 	int err = 0;
 
-	spec = kzalloc(sizeof(*spec), GFP_KERNEL);
+	spec = kvzalloc(sizeof(*spec), GFP_KERNEL);
 	if (!spec)
 		return -ENOMEM;
 
-	/* Action to copy 7 bit ipsec_syndrome to regB[0:6] */
+	/* Action to copy 7 bit ipsec_syndrome to regB[24:30] */
 	MLX5_SET(copy_action_in, action, action_type, MLX5_ACTION_TYPE_COPY);
 	MLX5_SET(copy_action_in, action, src_field, MLX5_ACTION_IN_FIELD_IPSEC_SYNDROME);
 	MLX5_SET(copy_action_in, action, src_offset, 0);
 	MLX5_SET(copy_action_in, action, length, 7);
 	MLX5_SET(copy_action_in, action, dst_field, MLX5_ACTION_IN_FIELD_METADATA_REG_B);
-	MLX5_SET(copy_action_in, action, dst_offset, 0);
+	MLX5_SET(copy_action_in, action, dst_offset, 24);
 
 	modify_hdr = mlx5_modify_header_alloc(mdev, MLX5_FLOW_NAMESPACE_KERNEL,
 					      1, action);
@@ -101,7 +101,7 @@ out:
 	if (err)
 		mlx5_modify_header_dealloc(mdev, modify_hdr);
 out_spec:
-	kfree(spec);
+	kvfree(spec);
 	return err;
 }
 
@@ -265,7 +265,8 @@ static int rx_create(struct mlx5e_priv *priv, enum accel_fs_esp_type type)
 	accel_esp = priv->ipsec->rx_fs;
 	fs_prot = &accel_esp->fs_prot[type];
 
-	fs_prot->default_dest = mlx5e_ttc_get_default_dest(priv, fs_esp2tt(type));
+	fs_prot->default_dest =
+		mlx5_ttc_get_default_dest(priv->fs.ttc, fs_esp2tt(type));
 
 	err = rx_err_create_ft(priv, fs_prot, &fs_prot->rx_err);
 	if (err)
@@ -301,7 +302,7 @@ static int rx_ft_get(struct mlx5e_priv *priv, enum accel_fs_esp_type type)
 	/* connect */
 	dest.type = MLX5_FLOW_DESTINATION_TYPE_FLOW_TABLE;
 	dest.ft = fs_prot->ft;
-	mlx5e_ttc_fwd_dest(priv, fs_esp2tt(type), &dest);
+	mlx5_ttc_fwd_dest(priv->fs.ttc, fs_esp2tt(type), &dest);
 
 out:
 	mutex_unlock(&fs_prot->prot_mutex);
@@ -320,7 +321,7 @@ static void rx_ft_put(struct mlx5e_priv *priv, enum accel_fs_esp_type type)
 		goto out;
 
 	/* disconnect */
-	mlx5e_ttc_fwd_default_dest(priv, fs_esp2tt(type));
+	mlx5_ttc_fwd_default_dest(priv->fs.ttc, fs_esp2tt(type));
 
 	/* remove FT */
 	rx_destroy(priv, type);
@@ -488,13 +489,13 @@ static int rx_add_rule(struct mlx5e_priv *priv,
 
 	setup_fte_common(attrs, ipsec_obj_id, spec, &flow_act);
 
-	/* Set 1  bit ipsec marker */
-	/* Set 24 bit ipsec_obj_id */
+	/* Set bit[31] ipsec marker */
+	/* Set bit[23-0] ipsec_obj_id */
 	MLX5_SET(set_action_in, action, action_type, MLX5_ACTION_TYPE_SET);
 	MLX5_SET(set_action_in, action, field, MLX5_ACTION_IN_FIELD_METADATA_REG_B);
-	MLX5_SET(set_action_in, action, data, (ipsec_obj_id << 1) | 0x1);
-	MLX5_SET(set_action_in, action, offset, 7);
-	MLX5_SET(set_action_in, action, length, 25);
+	MLX5_SET(set_action_in, action, data, (ipsec_obj_id | BIT(31)));
+	MLX5_SET(set_action_in, action, offset, 0);
+	MLX5_SET(set_action_in, action, length, 32);
 
 	modify_hdr = mlx5_modify_header_alloc(priv->mdev, MLX5_FLOW_NAMESPACE_KERNEL,
 					      1, action);

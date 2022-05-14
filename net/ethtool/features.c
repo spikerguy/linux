@@ -136,7 +136,6 @@ static void ethnl_features_to_bitmap(unsigned long *dest, netdev_features_t val)
 	const unsigned int words = BITS_TO_LONGS(NETDEV_FEATURE_COUNT);
 	unsigned int i;
 
-	bitmap_zero(dest, NETDEV_FEATURE_COUNT);
 	for (i = 0; i < words; i++)
 		dest[i] = (unsigned long)(val >> (i * BITS_PER_LONG));
 }
@@ -280,10 +279,10 @@ int ethnl_set_features(struct sk_buff *skb, struct genl_info *info)
 					  active_diff_mask, compact);
 	}
 	if (mod)
-		ethtool_notify(dev, ETHTOOL_MSG_FEATURES_NTF, NULL);
+		netdev_features_change(dev);
 
 out_rtnl:
 	rtnl_unlock();
-	dev_put(dev);
+	ethnl_parse_header_dev_put(&req_info);
 	return ret;
 }

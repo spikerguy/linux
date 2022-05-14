@@ -36,9 +36,9 @@ int mlx5e_xsk_wakeup(struct net_device *dev, u32 qid, u32 flags)
 		if (test_and_set_bit(MLX5E_SQ_STATE_PENDING_XSK_TX, &c->async_icosq.state))
 			return 0;
 
-		spin_lock(&c->async_icosq_lock);
+		spin_lock_bh(&c->async_icosq_lock);
 		mlx5e_trigger_irq(&c->async_icosq);
-		spin_unlock(&c->async_icosq_lock);
+		spin_unlock_bh(&c->async_icosq_lock);
 	}
 
 	return 0;
@@ -103,12 +103,15 @@ bool mlx5e_xsk_tx(struct mlx5e_xdpsq *sq, unsigned int budget)
 		xsk_buff_raw_dma_sync_for_device(pool, xdptxd.dma_addr, xdptxd.len);
 
 		ret = INDIRECT_CALL_2(sq->xmit_xdp_frame, mlx5e_xmit_xdp_frame_mpwqe,
-				      mlx5e_xmit_xdp_frame, sq, &xdptxd, &xdpi, check_result);
+				      mlx5e_xmit_xdp_frame, sq, &xdptxd, NULL,
+				      check_result);
 		if (unlikely(!ret)) {
 			if (sq->mpwqe.wqe)
 				mlx5e_xdp_mpwqe_complete(sq);
 
 			mlx5e_xsk_tx_post_err(sq, &xdpi);
+		} else {
+			mlx5e_xdpi_fifo_push(&sq->db.xdpi_fifo, &xdpi);
 		}
 
 		flush = true;

@@ -385,7 +385,7 @@ static int preserve_za_context(struct za_context __user *ctx)
 	return err ? -EFAULT : 0;
 }
 
-static int restore_za_context(struct user_ctxs __user *user)
+static int restore_za_context(struct user_ctxs *user)
 {
 	int err;
 	unsigned int vq;
@@ -1179,6 +1179,7 @@ static_assert(offsetof(siginfo_t, si_upper)	== 0x28);
 static_assert(offsetof(siginfo_t, si_pkey)	== 0x20);
 static_assert(offsetof(siginfo_t, si_perf_data)	== 0x18);
 static_assert(offsetof(siginfo_t, si_perf_type)	== 0x20);
+static_assert(offsetof(siginfo_t, si_perf_flags) == 0x24);
 static_assert(offsetof(siginfo_t, si_band)	== 0x10);
 static_assert(offsetof(siginfo_t, si_fd)	== 0x18);
 static_assert(offsetof(siginfo_t, si_call_addr)	== 0x10);

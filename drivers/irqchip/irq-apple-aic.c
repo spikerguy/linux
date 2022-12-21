@@ -228,7 +228,7 @@
 #define AIC_TMR_EL02_PHYS	AIC_TMR_GUEST_PHYS
 #define AIC_TMR_EL02_VIRT	AIC_TMR_GUEST_VIRT
 
-DEFINE_STATIC_KEY_TRUE(use_fast_ipi);
+static DEFINE_STATIC_KEY_TRUE(use_fast_ipi);
 
 struct aic_info {
 	int version;
@@ -248,14 +248,14 @@ struct aic_info {
 	bool fast_ipi;
 };
 
-static const struct aic_info aic1_info = {
+static const struct aic_info aic1_info __initconst = {
 	.version	= 1,
 
 	.event		= AIC_EVENT,
 	.target_cpu	= AIC_TARGET_CPU,
 };
 
-static const struct aic_info aic1_fipi_info = {
+static const struct aic_info aic1_fipi_info __initconst = {
 	.version	= 1,
 
 	.event		= AIC_EVENT,
@@ -264,7 +264,7 @@ static const struct aic_info aic1_fipi_info = {
 	.fast_ipi	= true,
 };
 
-static const struct aic_info aic2_info = {
+static const struct aic_info aic2_info __initconst = {
 	.version	= 2,
 
 	.irq_cfg	= AIC2_IRQ_CFG,

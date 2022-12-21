@@ -24,6 +24,7 @@ enum {
 enum {
 	MLX5_LAG_MODE_FLAG_HASH_BASED,
 	MLX5_LAG_MODE_FLAG_SHARED_FDB,
+	MLX5_LAG_MODE_FLAG_FDB_SEL_MODE_NATIVE,
 };
 
 enum mlx5_lag_mode {
@@ -49,6 +50,19 @@ struct lag_tracker {
 	enum netdev_lag_hash hash_type;
 };
 
+enum mpesw_op {
+	MLX5_MPESW_OP_ENABLE,
+	MLX5_MPESW_OP_DISABLE,
+};
+
+struct mlx5_mpesw_work_st {
+	struct work_struct work;
+	struct mlx5_lag    *lag;
+	enum mpesw_op	   op;
+	struct completion  comp;
+	int result;
+};
+
 /* LAG data of a ConnectX card.
  * It serves both its phys functions.
  */
@@ -65,7 +79,6 @@ struct mlx5_lag {
 	struct lag_tracker        tracker;
 	struct workqueue_struct   *wq;
 	struct delayed_work       bond_work;
-	struct work_struct	  mpesw_work;
 	struct notifier_block     nb;
 	struct lag_mp             lag_mp;
 	struct mlx5_lag_port_sel  port_sel;
@@ -114,7 +127,7 @@ bool mlx5_shared_fdb_supported(struct mlx5_lag *ldev);
 void mlx5_lag_del_mpesw_rule(struct mlx5_core_dev *dev);
 int mlx5_lag_add_mpesw_rule(struct mlx5_core_dev *dev);
 
-char *mlx5_get_str_port_sel_mode(struct mlx5_lag *ldev);
+char *mlx5_get_str_port_sel_mode(enum mlx5_lag_mode mode, unsigned long flags);
 void mlx5_infer_tx_enabled(struct lag_tracker *tracker, u8 num_ports,
 			   u8 *ports, int *num_enabled);
 

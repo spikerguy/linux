@@ -763,7 +763,7 @@ static blk_status_t apple_nvme_queue_rq(struct blk_mq_hw_ctx *hctx,
 			goto out_free_cmd;
 	}
 
-	blk_mq_start_request(req);
+	nvme_start_request(req);
 	apple_nvme_submit_cmd(q, cmnd);
 	return BLK_STS_OK;
 
@@ -821,7 +821,7 @@ static void apple_nvme_disable(struct apple_nvme *anv, bool shutdown)
 	if (!dead && shutdown && freeze)
 		nvme_wait_freeze_timeout(&anv->ctrl, NVME_IO_TIMEOUT);
 
-	nvme_stop_queues(&anv->ctrl);
+	nvme_quiesce_io_queues(&anv->ctrl);
 
 	if (!dead) {
 		if (READ_ONCE(anv->ioq.enabled)) {
@@ -829,15 +829,13 @@ static void apple_nvme_disable(struct apple_nvme *anv, bool shutdown)
 			apple_nvme_remove_cq(anv);
 		}
 
-		if (shutdown)
-			nvme_shutdown_ctrl(&anv->ctrl);
-		nvme_disable_ctrl(&anv->ctrl);
+		nvme_disable_ctrl(&anv->ctrl, shutdown);
 	}
 
 	WRITE_ONCE(anv->ioq.enabled, false);
 	WRITE_ONCE(anv->adminq.enabled, false);
 	mb(); /* ensure that nvme_queue_rq() sees that enabled is cleared */
-	nvme_stop_admin_queue(&anv->ctrl);
+	nvme_quiesce_admin_queue(&anv->ctrl);
 
 	/* last chance to complete any requests before nvme_cancel_request */
 	spin_lock_irqsave(&anv->lock, flags);
@@ -845,11 +843,8 @@ static void apple_nvme_disable(struct apple_nvme *anv, bool shutdown)
 	apple_nvme_handle_cq(&anv->adminq, true);
 	spin_unlock_irqrestore(&anv->lock, flags);
 
-	blk_mq_tagset_busy_iter(&anv->tagset, nvme_cancel_request, &anv->ctrl);
-	blk_mq_tagset_busy_iter(&anv->admin_tagset, nvme_cancel_request,
-				&anv->ctrl);
-	blk_mq_tagset_wait_completed_request(&anv->tagset);
-	blk_mq_tagset_wait_completed_request(&anv->admin_tagset);
+	nvme_cancel_tagset(&anv->ctrl);
+	nvme_cancel_admin_tagset(&anv->ctrl);
 
 	/*
 	 * The driver will not be starting up queues again if shutting down so
@@ -857,13 +852,12 @@ static void apple_nvme_disable(struct apple_nvme *anv, bool shutdown)
 	 * deadlocking blk-mq hot-cpu notifier.
 	 */
 	if (shutdown) {
-		nvme_start_queues(&anv->ctrl);
-		nvme_start_admin_queue(&anv->ctrl);
+		nvme_unquiesce_io_queues(&anv->ctrl);
+		nvme_unquiesce_admin_queue(&anv->ctrl);
 	}
 }
 
-static enum blk_eh_timer_return apple_nvme_timeout(struct request *req,
-						   bool reserved)
+static enum blk_eh_timer_return apple_nvme_timeout(struct request *req)
 {
 	struct apple_nvme_iod *iod = blk_mq_rq_to_pdu(req);
 	struct apple_nvme_queue *q = iod->q;
@@ -1043,6 +1037,8 @@ static void apple_nvme_reset_work(struct work_struct *work)
 					 dma_max_mapping_size(anv->dev) >> 9);
 	anv->ctrl.max_segments = NVME_MAX_SEGS;
 
+	dma_set_max_seg_size(anv->dev, 0xffffffff);
+
 	/*
 	 * Enable NVMMU and linear submission queues.
 	 * While we could keep those disabled and pretend this is slightly
@@ -1095,7 +1091,7 @@ static void apple_nvme_reset_work(struct work_struct *work)
 
 	dev_dbg(anv->dev, "Starting admin queue");
 	apple_nvme_init_queue(&anv->adminq);
-	nvme_start_admin_queue(&anv->ctrl);
+	nvme_unquiesce_admin_queue(&anv->ctrl);
 
 	if (!nvme_change_ctrl_state(&anv->ctrl, NVME_CTRL_CONNECTING)) {
 		dev_warn(anv->ctrl.device,
@@ -1104,7 +1100,7 @@ static void apple_nvme_reset_work(struct work_struct *work)
 		goto out;
 	}
 
-	ret = nvme_init_ctrl_finish(&anv->ctrl);
+	ret = nvme_init_ctrl_finish(&anv->ctrl, false);
 	if (ret)
 		goto out;
 
@@ -1129,7 +1125,7 @@ static void apple_nvme_reset_work(struct work_struct *work)
 
 	anv->ctrl.queue_count = nr_io_queues + 1;
 
-	nvme_start_queues(&anv->ctrl);
+	nvme_unquiesce_io_queues(&anv->ctrl);
 	nvme_wait_freeze(&anv->ctrl);
 	blk_mq_update_nr_hw_queues(&anv->tagset, 1);
 	nvme_unfreeze(&anv->ctrl);
@@ -1155,7 +1151,7 @@ out:
 	nvme_change_ctrl_state(&anv->ctrl, NVME_CTRL_DELETING);
 	nvme_get_ctrl(&anv->ctrl);
 	apple_nvme_disable(anv, false);
-	nvme_kill_queues(&anv->ctrl);
+	nvme_mark_namespaces_dead(&anv->ctrl);
 	if (!queue_work(nvme_wq, &anv->remove_work))
 		nvme_put_ctrl(&anv->ctrl);
 }
@@ -1223,6 +1219,11 @@ static void apple_nvme_async_probe(void *data, async_cookie_t cookie)
 	nvme_put_ctrl(&anv->ctrl);
 }
 
+static void devm_apple_nvme_put_tag_set(void *data)
+{
+	blk_mq_free_tag_set(data);
+}
+
 static int apple_nvme_alloc_tagsets(struct apple_nvme *anv)
 {
 	int ret;
@@ -1239,8 +1240,7 @@ static int apple_nvme_alloc_tagsets(struct apple_nvme *anv)
 	ret = blk_mq_alloc_tag_set(&anv->admin_tagset);
 	if (ret)
 		return ret;
-	ret = devm_add_action_or_reset(anv->dev,
-				       (void (*)(void *))blk_mq_free_tag_set,
+	ret = devm_add_action_or_reset(anv->dev, devm_apple_nvme_put_tag_set,
 				       &anv->admin_tagset);
 	if (ret)
 		return ret;
@@ -1264,8 +1264,8 @@ static int apple_nvme_alloc_tagsets(struct apple_nvme *anv)
 	ret = blk_mq_alloc_tag_set(&anv->tagset);
 	if (ret)
 		return ret;
-	ret = devm_add_action_or_reset(
-		anv->dev, (void (*)(void *))blk_mq_free_tag_set, &anv->tagset);
+	ret = devm_add_action_or_reset(anv->dev, devm_apple_nvme_put_tag_set,
+					&anv->tagset);
 	if (ret)
 		return ret;
 
@@ -1366,6 +1366,11 @@ static int apple_nvme_attach_genpd(struct apple_nvme *anv)
 	return 0;
 }
 
+static void devm_apple_nvme_mempool_destroy(void *data)
+{
+	mempool_destroy(data);
+}
+
 static int apple_nvme_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
@@ -1463,8 +1468,8 @@ static int apple_nvme_probe(struct platform_device *pdev)
 		ret = -ENOMEM;
 		goto put_dev;
 	}
-	ret = devm_add_action_or_reset(
-		anv->dev, (void (*)(void *))mempool_destroy, anv->iod_mempool);
+	ret = devm_add_action_or_reset(anv->dev,
+			devm_apple_nvme_mempool_destroy, anv->iod_mempool);
 	if (ret)
 		goto put_dev;
 
@@ -1497,14 +1502,6 @@ static int apple_nvme_probe(struct platform_device *pdev)
 	anv->ctrl.admin_q = blk_mq_init_queue(&anv->admin_tagset);
 	if (IS_ERR(anv->ctrl.admin_q)) {
 		ret = -ENOMEM;
-		goto put_dev;
-	}
-
-	if (!blk_get_queue(anv->ctrl.admin_q)) {
-		nvme_start_admin_queue(&anv->ctrl);
-		blk_cleanup_queue(anv->ctrl.admin_q);
-		anv->ctrl.admin_q = NULL;
-		ret = -ENODEV;
 		goto put_dev;
 	}
 

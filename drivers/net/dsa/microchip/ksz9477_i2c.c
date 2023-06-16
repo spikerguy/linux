@@ -104,7 +104,7 @@ static const struct of_device_id ksz9477_dt_ids[] = {
 	},
 	{
 		.compatible = "microchip,ksz8563",
-		.data = &ksz_switch_chips[KSZ9893]
+		.data = &ksz_switch_chips[KSZ8563]
 	},
 	{
 		.compatible = "microchip,ksz9567",
@@ -117,7 +117,7 @@ MODULE_DEVICE_TABLE(of, ksz9477_dt_ids);
 static struct i2c_driver ksz9477_i2c_driver = {
 	.driver = {
 		.name	= "ksz9477-switch",
-		.of_match_table = of_match_ptr(ksz9477_dt_ids),
+		.of_match_table = ksz9477_dt_ids,
 	},
 	.probe_new = ksz9477_i2c_probe,
 	.remove	= ksz9477_i2c_remove,

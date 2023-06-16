@@ -95,7 +95,7 @@ static struct test_item test_items[] = {
 
 static char stub_name[KSYM_NAME_LEN];
 
-static int stat_symbol_len(void *data, const char *name, struct module *mod, unsigned long addr)
+static int stat_symbol_len(void *data, const char *name, unsigned long addr)
 {
 	*(u32 *)data += strlen(name);
 
@@ -154,17 +154,14 @@ static void test_kallsyms_compression_ratio(void)
 	pr_info(" ---------------------------------------------------------\n");
 }
 
-static int lookup_name(void *data, const char *name, struct module *mod, unsigned long addr)
+static int lookup_name(void *data, const char *name, unsigned long addr)
 {
 	u64 t0, t1, t;
-	unsigned long flags;
 	struct test_stat *stat = (struct test_stat *)data;
 
-	local_irq_save(flags);
-	t0 = sched_clock();
+	t0 = ktime_get_ns();
 	(void)kallsyms_lookup_name(name);
-	t1 = sched_clock();
-	local_irq_restore(flags);
+	t1 = ktime_get_ns();
 
 	t = t1 - t0;
 	if (t < stat->min)
@@ -210,7 +207,7 @@ static bool match_cleanup_name(const char *s, const char *name)
 	return !strncmp(s, name, len);
 }
 
-static int find_symbol(void *data, const char *name, struct module *mod, unsigned long addr)
+static int find_symbol(void *data, const char *name, unsigned long addr)
 {
 	struct test_stat *stat = (struct test_stat *)data;
 
@@ -234,18 +231,15 @@ static int find_symbol(void *data, const char *name, struct module *mod, unsigne
 static void test_perf_kallsyms_on_each_symbol(void)
 {
 	u64 t0, t1;
-	unsigned long flags;
 	struct test_stat stat;
 
 	memset(&stat, 0, sizeof(stat));
 	stat.max = INT_MAX;
 	stat.name = stub_name;
 	stat.perf = 1;
-	local_irq_save(flags);
-	t0 = sched_clock();
+	t0 = ktime_get_ns();
 	kallsyms_on_each_symbol(find_symbol, &stat);
-	t1 = sched_clock();
-	local_irq_restore(flags);
+	t1 = ktime_get_ns();
 	pr_info("kallsyms_on_each_symbol() traverse all: %lld ns\n", t1 - t0);
 }
 
@@ -270,17 +264,14 @@ static int match_symbol(void *data, unsigned long addr)
 static void test_perf_kallsyms_on_each_match_symbol(void)
 {
 	u64 t0, t1;
-	unsigned long flags;
 	struct test_stat stat;
 
 	memset(&stat, 0, sizeof(stat));
 	stat.max = INT_MAX;
 	stat.name = stub_name;
-	local_irq_save(flags);
-	t0 = sched_clock();
+	t0 = ktime_get_ns();
 	kallsyms_on_each_match_symbol(match_symbol, stat.name, &stat);
-	t1 = sched_clock();
-	local_irq_restore(flags);
+	t1 = ktime_get_ns();
 	pr_info("kallsyms_on_each_match_symbol() traverse all: %lld ns\n", t1 - t0);
 }
 

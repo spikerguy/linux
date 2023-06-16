@@ -40,8 +40,8 @@ Here are the main features of EROFS:
  - Support multiple devices to refer to external blobs, which can be used
    for container images;
 
- - 4KiB block size and 32-bit block addresses for each device, therefore
-   16TiB address space at most for now;
+ - 32-bit block addresses for each device, therefore 16TiB address space at
+   most with 4KiB block size for now;
 
  - Two inode layouts for different requirements:
 
@@ -120,6 +120,8 @@ dax={always,never}     Use direct access (no page cache).  See
 dax                    A legacy option which is an alias for ``dax=always``.
 device=%s              Specify a path to an extra device to be used together.
 fsid=%s                Specify a filesystem image ID for Fscache back-end.
+domain_id=%s           Specify a domain ID in fscache mode so that different images
+                       with the same blobs under a given domain ID can share storage.
 ===================    =========================================================
 
 Sysfs Entries
